@@ -22,7 +22,7 @@ jobs:
   rust:
     uses: rustly-tech/.github/.github/workflows/rust-ci.yml@main
     with:
-      msrv: "1.88.0"
+      msrv: "1.95.0"
       features: "--all-features"
 
   security:

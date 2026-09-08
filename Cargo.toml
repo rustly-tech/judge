@@ -16,7 +16,12 @@ members = [
 version = "0.1.0"
 edition = "2021"
 # MSRV is set by our dependency floor and enforced by CI.
-rust-version = "1.88"
+#
+# Wasmtime 48 requires 1.95. That is a higher floor than the rest of the
+# organisation, and it is the right trade: the sandbox is the security boundary,
+# so it tracks upstream closely rather than pinning an old engine to keep an
+# older toolchain working.
+rust-version = "1.95"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/rustly-tech/judge"
 authors = ["Rustly contributors"]

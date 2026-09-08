@@ -111,6 +111,11 @@ fn default_true() -> bool {
 ///
 /// Recorded so a verdict can be reproduced later. A submission judged under a
 /// different toolchain is not the same submission.
+///
+/// This is **not** the judge's own MSRV. It is the Rust version learners write
+/// against, which is a product decision made in the content repository. The
+/// judge binary currently requires a newer toolchain to build than the one it
+/// compiles submissions with, and those two numbers move independently.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Environment {
     /// Opaque identifier, e.g. `"rust-1.88-wasm32-wasip1"`.
