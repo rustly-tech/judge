@@ -1,0 +1,231 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  schedule:
+    - cron: "37 5 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    uses: rustly-tech/.github/.github/workflows/rust-ci.yml@main
+    with:
+      msrv: "1.88.0"
+      features: "--all-features"
+
+  security:
+    uses: rustly-tech/.github/.github/workflows/rust-security.yml@main
+
+  sandbox:
+    name: sandbox limit corpus
+    runs-on: ubuntu-latest
+    # A sandbox regression can hang instead of failing. A hard timeout turns
+    # that into a red build rather than a stuck queue.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: sandbox
+
+      - name: Adversarial limit corpus
+        run: cargo test -p rustly-sandbox --test limits -- --nocapture
+
+      - name: The gated native backend still compiles and still refuses
+        run: |
+          cargo test -p rustly-sandbox --features native-backend -- native
+
+  real-rust:
+    name: real Rust end to end (wasm32-wasip1)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: stable
+          targets: wasm32-wasip1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: real-rust
+
+      - name: Build the worker
+        run: cargo build --release -p rustly-judge-worker
+
+      # The WAT-based sandbox suite is fast and precise but is not what users
+      # actually submit. This job closes that gap with a genuine rustc build.
+      - name: Compile the fixtures for wasm32-wasip1
+        run: |
+          set -euo pipefail
+          mkdir -p out artifacts
+          rustc --target wasm32-wasip1 -O -o out/sum.wasm   tests/fixtures/sum.rs
+          rustc --target wasm32-wasip1 -O -o out/wrong.wasm tests/fixtures/wrong.rs
+
+      - name: Seed the artifact directory
+        id: seed
+        run: |
+          set -euo pipefail
+          ./target/release/rustly-judge-worker seed --artifacts artifacts \
+            tests/fixtures/package.json out/sum.wasm out/wrong.wasm | tee seeded.txt
+          {
+            echo "package=$(awk '/package.json/ {print $1}' seeded.txt)"
+            echo "good=$(awk '/sum.wasm/ {print $1}' seeded.txt)"
+            echo "bad=$(awk '/wrong.wasm/ {print $1}' seeded.txt)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: A correct submission is accepted, hidden tests included
+        run: |
+          ./target/release/rustly-judge-worker run-local \
+            --artifacts artifacts \
+            --package '${{ steps.seed.outputs.package }}' \
+            --source  '${{ steps.seed.outputs.good }}' \
+            --trust trusted --hidden
+
+      - name: A wrong submission is rejected
+        run: |
+          set +e
+          output=$(./target/release/rustly-judge-worker run-local \
+            --artifacts artifacts \
+            --package '${{ steps.seed.outputs.package }}' \
+            --source  '${{ steps.seed.outputs.bad }}' \
+            --trust trusted --hidden --redacted 2>&1)
+          status=$?
+          echo "$output"
+          if [ "$status" -eq 0 ]; then
+            echo "::error::a wrong submission was accepted"
+            exit 1
+          fi
+          echo "$output" | grep -q '"verdict": "WA"' || {
+            echo "::error::expected WA"; exit 1; }
+
+      - name: A volunteer worker receives no hidden test data
+        run: |
+          set -euo pipefail
+          output=$(./target/release/rustly-judge-worker run-local \
+            --artifacts artifacts \
+            --package '${{ steps.seed.outputs.package }}' \
+            --source  '${{ steps.seed.outputs.good }}' \
+            --trust volunteer)
+          echo "$output"
+          # The hidden case's input, expected output, and id must all be absent.
+          for secret in 4611686018427387903 9223372036854775806 hidden-large; do
+            if echo "$output" | grep -q "$secret"; then
+              echo "::error::hidden test material leaked to a volunteer worker: $secret"
+              exit 1
+            fi
+          done
+          echo "$output" | grep -q '"visibility": "hidden"' && {
+            echo "::error::a hidden case reached a volunteer worker"; exit 1; }
+          echo "ok: volunteer saw public cases only"
+
+  broker-worker:
+    name: broker and worker over HTTP
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: stable
+          targets: wasm32-wasip1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: broker-worker
+
+      - run: cargo build --release -p rustly-judge-broker -p rustly-judge-worker
+
+      - name: Judge a real submission through a running broker
+        run: |
+          set -euo pipefail
+          mkdir -p out artifacts
+          rustc --target wasm32-wasip1 -O -o out/sum.wasm tests/fixtures/sum.rs
+          ./target/release/rustly-judge-worker seed --artifacts artifacts \
+            tests/fixtures/package.json out/sum.wasm > seeded.txt
+          PACKAGE=$(awk '/package.json/ {print $1}' seeded.txt)
+          SOURCE=$(awk '/sum.wasm/ {print $1}' seeded.txt)
+
+          ./target/release/rustly-judge-broker --bind 127.0.0.1:8090 &
+          BROKER=$!
+          trap 'kill $BROKER' EXIT
+          for _ in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:8090/status > /dev/null && break
+            sleep 1
+          done
+
+          curl -fsS -X POST http://127.0.0.1:8090/api/v1/judge/jobs \
+            -H 'content-type: application/json' \
+            -d "$(jq -n --arg s "$SOURCE" --arg p "$PACKAGE" '{
+                  spec: {
+                    protocol_version: 1, job_id: "ci-1",
+                    source_cid: $s, trial_package_cid: $p, trial_version: 1,
+                    environment_id: "rust-1.88-wasm32-wasip1",
+                    limits: { wall_ms: 2000, memory_bytes: 67108864,
+                              output_bytes: 262144, fuel: 500000000,
+                              table_elements: 10000, instances: 1 },
+                    backend: "wasmtime", includes_hidden_tests: false
+                  },
+                  package_has_hidden_tests: true
+                }')"
+
+          timeout 120 ./target/release/rustly-judge-worker serve \
+            --broker http://127.0.0.1:8090 --artifacts artifacts \
+            --worker-id ci-worker --trust trusted --capacity 1 &
+          WORKER=$!
+
+          for _ in $(seq 1 60); do
+            finished=$(curl -fsS http://127.0.0.1:8090/status | jq -r .finished)
+            [ "$finished" = "1" ] && break
+            sleep 1
+          done
+          kill $WORKER 2>/dev/null || true
+
+          status=$(curl -fsS http://127.0.0.1:8090/status)
+          echo "$status"
+          [ "$(echo "$status" | jq -r .finished)" = "1" ] || {
+            echo "::error::the worker never reported a result"; exit 1; }
+
+  release:
+    name: release binaries
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [rust, sandbox, real-rust]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: stable
+      - run: cargo build --release --locked -p rustly-judge-broker -p rustly-judge-worker
+
+      - name: Generate an SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with:
+          path: .
+          format: spdx-json
+          output-file: rustly-judge-sbom.spdx.json
+
+      # Durable published artifacts belong in a Release, not in Actions storage.
+      - name: Publish
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          files: |
+            target/release/rustly-judge-broker
+            target/release/rustly-judge-worker
+            rustly-judge-sbom.spdx.json
+          generate_release_notes: true

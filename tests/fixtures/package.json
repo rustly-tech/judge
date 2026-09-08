@@ -1,0 +1,44 @@
+{
+  "format_version": 1,
+  "slug": "sum-two-integers",
+  "version": 1,
+  "mode": "batch",
+  "environment": {
+    "id": "rust-1.88-wasm32-wasip1",
+    "edition": "2021",
+    "toolchain": "1.88",
+    "target": "wasm32-wasip1"
+  },
+  "limits": {
+    "wall_ms": 2000,
+    "memory_bytes": 67108864,
+    "output_bytes": 262144,
+    "fuel": 500000000,
+    "table_elements": 10000,
+    "instances": 1
+  },
+  "checker": { "kind": "trimmed_lines" },
+  "scoring": "all_or_nothing",
+  "fail_fast": true,
+  "groups": [],
+  "tests": [
+    {
+      "id": "public-small",
+      "visibility": "public",
+      "stdin": "1 2\n",
+      "expected_stdout": "3\n"
+    },
+    {
+      "id": "public-negative",
+      "visibility": "public",
+      "stdin": "-5 5\n",
+      "expected_stdout": "0\n"
+    },
+    {
+      "id": "hidden-large",
+      "visibility": "hidden",
+      "stdin": "4611686018427387903 4611686018427387903\n",
+      "expected_stdout": "9223372036854775806\n"
+    }
+  ]
+}

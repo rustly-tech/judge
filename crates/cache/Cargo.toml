@@ -1,0 +1,18 @@
+[package]
+name = "rustly-judge-cache"
+description = "Content-addressed, integrity-verified artifact cache for the Rustly judge."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+blake3.workspace = true
+rustly-judge-common.workspace = true
+serde.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

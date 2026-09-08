@@ -1,0 +1,16 @@
+[package]
+name = "rustly-judge-common"
+description = "Shared verdict, error, and limit primitives for the Rustly judge."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

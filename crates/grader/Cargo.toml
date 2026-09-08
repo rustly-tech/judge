@@ -1,0 +1,21 @@
+[package]
+name = "rustly-grader"
+description = "Compile-once/run-many grading orchestration for the Rustly judge."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+rustly-checker.workspace = true
+rustly-judge-common.workspace = true
+rustly-judge-protocol.workspace = true
+rustly-problem-format.workspace = true
+rustly-sandbox.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+wat.workspace = true

@@ -1,0 +1,55 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/common",
+    "crates/protocol",
+    "crates/problem-format",
+    "crates/checker",
+    "crates/grader",
+    "crates/sandbox",
+    "crates/cache",
+    "services/broker",
+    "services/worker",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+# MSRV is set by our dependency floor and enforced by CI.
+rust-version = "1.88"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/rustly-tech/judge"
+authors = ["Rustly contributors"]
+
+[workspace.dependencies]
+rustly-judge-common = { path = "crates/common", version = "0.1.0" }
+rustly-judge-protocol = { path = "crates/protocol", version = "0.1.0" }
+rustly-problem-format = { path = "crates/problem-format", version = "0.1.0" }
+rustly-checker = { path = "crates/checker", version = "0.1.0" }
+rustly-grader = { path = "crates/grader", version = "0.1.0" }
+rustly-sandbox = { path = "crates/sandbox", version = "0.1.0" }
+rustly-judge-cache = { path = "crates/cache", version = "0.1.0" }
+
+anyhow = "1.0"
+axum = { version = "0.8", features = ["macros", "json"] }
+blake3 = "1.8"
+clap = { version = "4", features = ["derive", "env"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "sync", "time"] }
+toml = "0.9"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+# Core modules only: no GC, no component model. Neither is needed for a
+# wasm32-wasip1 submission, and both widen the trusted surface.
+wasmtime = { version = "48", default-features = false, features = ["cranelift", "runtime", "std"] }
+wasmtime-wasi = { version = "48", default-features = false, features = ["p1", "p2"] }
+bytes = "1"
+wat = "1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

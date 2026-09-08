@@ -1,0 +1,31 @@
+[package]
+name = "rustly-sandbox"
+description = "Sandboxed execution backends for the Rustly judge. Wasmtime is the qualified backend."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[features]
+default = ["wasmtime-backend"]
+# The Wasmtime/WASI backend. The only backend used for untrusted submissions.
+wasmtime-backend = ["dep:wasmtime", "dep:wasmtime-wasi"]
+# The native backend. EXPERIMENTAL and qualification-gated; see docs/THREAT_MODEL.md.
+# Enabling this feature does not enable the backend: it must also be unlocked at
+# runtime with an explicit qualification token.
+native-backend = []
+
+[dependencies]
+bytes.workspace = true
+rustly-judge-common.workspace = true
+serde.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+wasmtime = { workspace = true, optional = true }
+wasmtime-wasi = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde_json.workspace = true
+wat.workspace = true
