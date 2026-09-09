@@ -13,6 +13,7 @@
 //! | Backend | Status | Safe for untrusted input |
 //! | --- | --- | --- |
 //! | [`PrecompiledModule`] | **IMPLEMENTED** | Yes - it compiles nothing |
+//! | [`crate::compile_container::ContainerRustcCompiler`] | **QUALIFIED** | Yes, with the pinned image and Docker policy |
 //! | [`CargoCompiler`] | **EXPERIMENTAL** | **No.** Not qualified |
 //!
 //! [`CargoCompiler`] is behind the `cargo-compiler` Cargo feature *and* refuses
@@ -233,6 +234,7 @@ impl CompileBackend for CargoCompiler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "cargo-compiler")]
     use rustly_judge_common::Verdict;
 
     #[test]

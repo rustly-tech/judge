@@ -50,6 +50,27 @@ jobs:
         run: |
           cargo test -p rustly-sandbox --features native-backend -- native
 
+  compiler-sandbox:
+    name: compiler container corpus
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: compiler-sandbox
+      - name: Build the pinned compiler image
+        run: docker build --pull --tag rustly-compiler:qualification compiler-image
+      - name: Run compilation boundary corpus
+        run: |
+          image=$(docker image inspect rustly-compiler:qualification --format '{{.Id}}')
+          RUSTLY_TEST_COMPILER_IMAGE="$image" cargo test \
+            -p rustly-judge-worker --test compiler_container -- --ignored --test-threads=1
+          [ -z "$(docker ps --filter name=rustly-compile- --format '{{.Names}}')" ]
+
   real-rust:
     name: real Rust end to end (wasm32-wasip1)
     runs-on: ubuntu-latest

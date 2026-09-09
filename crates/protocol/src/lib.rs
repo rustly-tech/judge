@@ -148,6 +148,8 @@ pub struct ResultManifest {
     pub protocol_version: u32,
     /// Job this manifest describes.
     pub job_id: String,
+    /// Immutable Trial package judged for this result.
+    pub trial_package_cid: String,
     /// Trial content version judged against.
     pub trial_version: u32,
     /// Environment used.
@@ -259,6 +261,7 @@ mod tests {
         ResultManifest {
             protocol_version: PROTOCOL_VERSION,
             job_id: "job-1".into(),
+            trial_package_cid: "b3:bb".into(),
             trial_version: 1,
             environment_id: "rust-1.88-wasm32-wasip1".into(),
             verdict: Verdict::WrongAnswer,

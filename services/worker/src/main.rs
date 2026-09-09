@@ -16,9 +16,9 @@ use clap::{Parser, Subcommand};
 use rustly_judge_cache::ArtifactCache;
 use rustly_judge_common::Limits;
 use rustly_judge_protocol::{Backend, JobSpec, ResultSummary, TrustClass, PROTOCOL_VERSION};
-use rustly_judge_worker::compile::PrecompiledModule;
+use rustly_judge_worker::compile::{CompileBackend, PrecompiledModule};
 use rustly_judge_worker::pipeline::JobContext;
-use rustly_judge_worker::{run_job, ArtifactSource, LocalArtifacts};
+use rustly_judge_worker::{run_job, ArtifactSource, ContainerRustcCompiler, LocalArtifacts};
 use rustly_sandbox::WasmtimeBackend;
 use serde::{Deserialize, Serialize};
 
@@ -59,6 +59,9 @@ enum Command {
         /// Print the submitter-safe manifest instead of the full one.
         #[arg(long)]
         redacted: bool,
+        /// Immutable compiler image for raw Rust source. Omit for precompiled WASM.
+        #[arg(long)]
+        compiler_image: Option<String>,
     },
 
     /// Store files in an artifact directory and print their CIDs.
@@ -94,6 +97,9 @@ enum Command {
         /// Jobs to lease at a time.
         #[arg(long, default_value_t = 1)]
         capacity: u32,
+        /// Immutable compiler image (`name@sha256:...`) for submitted Rust.
+        #[arg(long, env = "RUSTLY_COMPILER_IMAGE")]
+        compiler_image: Option<String>,
     },
 }
 
@@ -151,6 +157,7 @@ fn main() -> anyhow::Result<()> {
             trust,
             hidden,
             redacted,
+            compiler_image,
         } => {
             let artifacts = LocalArtifacts::new(artifacts);
             let sandbox = WasmtimeBackend::new().context("building the sandbox")?;
@@ -173,9 +180,17 @@ fn main() -> anyhow::Result<()> {
                 },
             )?;
 
+            let container = compiler_image
+                .map(|image| ContainerRustcCompiler::new(image, &spec.environment_id))
+                .transpose()
+                .map_err(|error| anyhow::anyhow!("{error}"))?;
+            let precompiled = PrecompiledModule;
+            let compiler: &dyn CompileBackend = container
+                .as_ref()
+                .map_or(&precompiled, |value| value as &dyn CompileBackend);
             let context = JobContext {
                 artifacts: &artifacts,
-                compiler: &PrecompiledModule,
+                compiler,
                 sandbox: &sandbox,
                 cache: None,
                 trust_class: trust,
@@ -214,12 +229,21 @@ fn main() -> anyhow::Result<()> {
             worker_id,
             trust,
             capacity,
+            compiler_image,
         } => {
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()
                 .context("building the async runtime")?;
-            runtime.block_on(serve(broker, artifacts, cache, worker_id, trust, capacity))?;
+            runtime.block_on(serve(
+                broker,
+                artifacts,
+                cache,
+                worker_id,
+                trust,
+                capacity,
+                compiler_image,
+            ))?;
         }
     }
     Ok(())
@@ -234,6 +258,7 @@ async fn serve(
     worker_id: String,
     trust: TrustClass,
     capacity: u32,
+    compiler_image: Option<String>,
 ) -> anyhow::Result<()> {
     {
         let artifacts = Arc::new(LocalArtifacts::new(artifacts));
@@ -246,6 +271,23 @@ async fn serve(
             .timeout(Duration::from_secs(30))
             .build()
             .context("building the HTTP client")?;
+        let container = compiler_image
+            .map(|image| {
+                ContainerRustcCompiler::new(image, "rust-1.88-wasm32-wasip1")
+                    .map_err(|error| anyhow::anyhow!("{error}"))
+            })
+            .transpose()?;
+        if let Some(cleanup) = container.clone() {
+            tokio::spawn(async move {
+                wait_for_shutdown().await;
+                cleanup.cancel_all();
+                std::process::exit(130);
+            });
+        }
+        let precompiled = PrecompiledModule;
+        let compiler: &dyn CompileBackend = container
+            .as_ref()
+            .map_or(&precompiled, |value| value as &dyn CompileBackend);
 
         tracing::info!(%worker_id, ?trust, %broker, "worker starting");
         if trust == TrustClass::Trusted {
@@ -282,7 +324,7 @@ async fn serve(
             for spec in leased.jobs {
                 let context = JobContext {
                     artifacts: artifacts.as_ref(),
-                    compiler: &PrecompiledModule,
+                    compiler,
                     sandbox: &sandbox,
                     cache: cache.as_ref(),
                     trust_class: trust,
@@ -331,6 +373,23 @@ async fn serve(
                 }
             }
         }
+    }
+}
+
+async fn wait_for_shutdown() {
+    #[cfg(unix)]
+    {
+        let mut terminate =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .expect("install SIGTERM handler");
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {},
+            _ = terminate.recv() => {},
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
     }
 }
 

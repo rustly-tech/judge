@@ -32,6 +32,8 @@ use rustly_sandbox::{ensure_qualified, ExecutionBackend, ExecutionRequest};
 pub struct GradeRequest<'a> {
     /// Job identifier, recorded in the manifest.
     pub job_id: &'a str,
+    /// Immutable Trial package identifier, recorded in the manifest.
+    pub trial_package_cid: &'a str,
     /// The compiled module.
     pub module: &'a [u8],
     /// The Trial package. Hidden cases must already have been removed if this
@@ -113,6 +115,7 @@ pub fn grade(backend: &dyn ExecutionBackend, request: GradeRequest<'_>) -> Resul
     Ok(ResultManifest {
         protocol_version: PROTOCOL_VERSION,
         job_id: request.job_id.to_owned(),
+        trial_package_cid: request.trial_package_cid.to_owned(),
         trial_version: request.package.version,
         environment_id: request.package.environment.id.clone(),
         verdict,
@@ -131,6 +134,7 @@ pub fn grade(backend: &dyn ExecutionBackend, request: GradeRequest<'_>) -> Resul
 /// get used to reading.
 pub fn compile_error(
     job_id: &str,
+    trial_package_cid: &str,
     package: &TrialPackage,
     diagnostics: String,
     compile_ms: u64,
@@ -138,6 +142,7 @@ pub fn compile_error(
     ResultManifest {
         protocol_version: PROTOCOL_VERSION,
         job_id: job_id.to_owned(),
+        trial_package_cid: trial_package_cid.to_owned(),
         trial_version: package.version,
         environment_id: package.environment.id.clone(),
         verdict: Verdict::CompileError,
@@ -190,12 +195,14 @@ pub fn is_safe_for_submitter(manifest: &ResultManifest) -> bool {
 /// own classification, so an infrastructure failure cannot become a `CE`.
 pub fn manifest_for_error(
     job_id: &str,
+    trial_package_cid: &str,
     package: &TrialPackage,
     error: &JudgeError,
 ) -> ResultManifest {
     ResultManifest {
         protocol_version: PROTOCOL_VERSION,
         job_id: job_id.to_owned(),
+        trial_package_cid: trial_package_cid.to_owned(),
         trial_version: package.version,
         environment_id: package.environment.id.clone(),
         verdict: error.verdict(),

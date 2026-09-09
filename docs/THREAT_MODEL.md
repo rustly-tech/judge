@@ -39,11 +39,30 @@ there is a module to sandbox.
 | Execution | `rustly_sandbox::WasmtimeBackend` | **IMPLEMENTED**, adversarially tested (`crates/sandbox/tests/limits.rs`) |
 | Execution | `rustly_sandbox::NativeBackend` | **EXPERIMENTAL**, refuses to execute |
 | Compilation | `rustly_judge_worker::compile::PrecompiledModule` | **IMPLEMENTED** - executes nothing, so it is safe by construction |
+| Compilation | `rustly_judge_worker::ContainerRustcCompiler` | **QUALIFIED** for dependency-free single-file Rust with the pinned image and OCI policy |
 | Compilation | `rustly_judge_worker::compile::CargoCompiler` | **EXPERIMENTAL**, double-locked, **not for untrusted input** |
 
-### 3.1 The compile-sandbox gap, stated plainly
+### 3.1 Qualified compiler boundary
 
-We do **not** currently have a qualified sandbox for compiling untrusted Rust.
+`ContainerRustcCompiler` invokes `rustc` directly inside a disposable container.
+Submitted bytes become one read-only `main.rs`; Cargo metadata, dependencies,
+`build.rs`, proc macros, and registry access are absent. The invocation enforces
+no network, a read-only root, an unprivileged uid, no Linux capabilities,
+`no_new_privs`, memory/CPU/PID/file/output limits, a wall timeout, and one
+isolated writable output directory. Images are accepted only by SHA-256 digest.
+Dropping a compile or cancelling the worker force-removes its active containers.
+
+The qualification corpus covers successful WASI compilation, malformed and
+oversized source, diagnostic flooding, host-path reads, artifact limits, wall
+timeout, and cleanup. The argument-level test separately locks every container
+control so removing one is a visible failure.
+
+The boundary assumes a patched, correctly configured Docker-compatible daemon.
+A kernel or container-runtime escape remains residual risk. The production
+worker must run on dedicated operator-controlled capacity with no unrelated
+secrets mounted into compiler containers.
+
+### 3.2 Experimental Cargo compiler
 
 `CargoCompiler` is behind the `cargo-compiler` Cargo feature *and* must be
 unlocked at runtime by calling `unlock_for_trusted_input()`. Two locks, because
@@ -51,10 +70,9 @@ one feature flag is too easy to switch on in a deployment script. Its
 `is_qualified_for_untrusted_code()` returns `false` unconditionally: unlocking
 asserts something about the *input*, never about the backend.
 
-Until that gap is closed, a production deployment judging public submissions must
-compile in operator-controlled, disposable infrastructure that is treated as
-already compromised, and hand the resulting module to a worker for execution.
-The `PrecompiledModule` path exists precisely so that split is expressible.
+It remains available only for trusted development inputs. The submission
+pipeline refuses every compiler whose `is_qualified_for_untrusted_code()` is
+false, even when the feature and runtime unlock are both present.
 
 ## 4. Execution sandbox: what is enforced
 

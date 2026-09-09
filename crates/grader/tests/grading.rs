@@ -120,6 +120,7 @@ fn package(tests: Vec<TestCase>, fail_fast: bool) -> TrialPackage {
 fn request<'a>(package: &'a TrialPackage, module: &'a [u8]) -> GradeRequest<'a> {
     GradeRequest {
         job_id: "job-1",
+        trial_package_cid: "b3:trial-package",
         module,
         package,
         compiler_diagnostics: None,
@@ -350,7 +351,8 @@ fn compile_errors_preserve_raw_diagnostics_verbatim() {
     let package = package(vec![case("public-1", Visibility::Public, "1\n")], true);
     let raw = "error[E0382]: borrow of moved value: `s`\n --> src/main.rs:4:20\n";
 
-    let manifest = rustly_grader::compile_error("job-1", &package, raw.to_owned(), 420);
+    let manifest =
+        rustly_grader::compile_error("job-1", "b3:trial-package", &package, raw.to_owned(), 420);
     assert_eq!(manifest.verdict, Verdict::CompileError);
     assert_eq!(
         manifest.compiler_diagnostics.as_deref(),
@@ -364,7 +366,7 @@ fn compile_errors_preserve_raw_diagnostics_verbatim() {
 fn a_judge_error_becomes_a_manifest_with_the_errors_own_verdict() {
     let package = package(vec![case("public-1", Visibility::Public, "1\n")], true);
     let error = JudgeError::Infrastructure("queue unreachable".into());
-    let manifest = rustly_grader::manifest_for_error("job-1", &package, &error);
+    let manifest = rustly_grader::manifest_for_error("job-1", "b3:trial-package", &package, &error);
 
     assert_eq!(manifest.verdict, Verdict::InternalError);
     assert_ne!(manifest.verdict, Verdict::CompileError);

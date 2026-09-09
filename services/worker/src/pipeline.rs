@@ -54,6 +54,13 @@ impl JobReport {
 /// Anything that is a statement about the submission comes back as a
 /// [`JobReport`] with the appropriate verdict.
 pub fn run_job(context: &JobContext<'_>, spec: &JobSpec) -> Result<JobReport> {
+    if !context.compiler.is_qualified_for_untrusted_code() {
+        return Err(JudgeError::SecurityPolicy(format!(
+            "compiler backend {} is not qualified for submitted source",
+            context.compiler.id()
+        )));
+    }
+
     // 1. Refuse a job this worker must not accept. Checked here as well as at
     //    the broker: a worker that would leak hidden tests should refuse even
     //    when the broker gets it wrong.
@@ -132,6 +139,7 @@ pub fn run_job(context: &JobContext<'_>, spec: &JobSpec) -> Result<JobReport> {
         CompileOutput::Failed { diagnostics } => {
             return Ok(JobReport::new(compile_error(
                 &spec.job_id,
+                &spec.trial_package_cid,
                 &package,
                 diagnostics,
                 compile_ms,
@@ -160,6 +168,7 @@ pub fn run_job(context: &JobContext<'_>, spec: &JobSpec) -> Result<JobReport> {
         context.sandbox,
         GradeRequest {
             job_id: &spec.job_id,
+            trial_package_cid: &spec.trial_package_cid,
             module: &module,
             package: &package,
             compiler_diagnostics: diagnostics,
@@ -169,7 +178,7 @@ pub fn run_job(context: &JobContext<'_>, spec: &JobSpec) -> Result<JobReport> {
     ) {
         Ok(manifest) => manifest,
         Err(error) if error.is_retryable() => return Err(error),
-        Err(error) => manifest_for_error(&spec.job_id, &package, &error),
+        Err(error) => manifest_for_error(&spec.job_id, &spec.trial_package_cid, &package, &error),
     };
 
     Ok(JobReport::new(manifest))
