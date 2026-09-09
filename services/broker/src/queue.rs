@@ -62,6 +62,8 @@ pub enum ReportError {
     NotLeaseHolder,
     /// The reporting worker speaks a different protocol version.
     ProtocolMismatch,
+    /// The result names a different evaluation package than the leased job.
+    PackageMismatch,
 }
 
 impl std::fmt::Display for ReportError {
@@ -70,6 +72,7 @@ impl std::fmt::Display for ReportError {
             Self::UnknownJob => f.write_str("no such leased job"),
             Self::NotLeaseHolder => f.write_str("job is leased by another worker"),
             Self::ProtocolMismatch => f.write_str("unsupported protocol version"),
+            Self::PackageMismatch => f.write_str("result package does not match leased job"),
         }
     }
 }
@@ -202,6 +205,9 @@ impl Queue {
         if state.leased[index].worker_id != summary.worker_id {
             return Err(ReportError::NotLeaseHolder);
         }
+        if state.leased[index].job.spec.trial_package_cid != summary.trial_package_cid {
+            return Err(ReportError::PackageMismatch);
+        }
         state.leased.remove(index);
         state.finished.push((job_id.to_owned(), summary));
         Ok(true)
@@ -234,6 +240,7 @@ mod tests {
         ResultSummary {
             protocol_version: PROTOCOL_VERSION,
             worker_id: worker.into(),
+            trial_package_cid: "b3:package".into(),
             verdict: Verdict::Accepted,
             result_manifest_hash: "b3:manifest".into(),
             peak_memory_bytes: 1024,
@@ -374,5 +381,20 @@ mod tests {
             queue.report_for("j", bad),
             Err(ReportError::ProtocolMismatch)
         );
+    }
+
+    #[test]
+    fn a_result_for_a_different_evaluation_package_is_rejected() {
+        let queue = Queue::new();
+        queue.submit(job("j", false));
+        queue.lease("w1", TrustClass::Trusted, 1);
+
+        let mut bad = summary("w1");
+        bad.trial_package_cid = "b3:other-package".into();
+        assert_eq!(
+            queue.report_for("j", bad),
+            Err(ReportError::PackageMismatch)
+        );
+        assert_eq!(queue.in_flight(), 1);
     }
 }

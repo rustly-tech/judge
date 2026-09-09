@@ -353,6 +353,7 @@ async fn serve(
                         ResultSummary {
                             protocol_version: PROTOCOL_VERSION,
                             worker_id: worker_id.clone(),
+                            trial_package_cid: spec.trial_package_cid.clone(),
                             verdict: error.verdict(),
                             result_manifest_hash: String::new(),
                             peak_memory_bytes: 0,

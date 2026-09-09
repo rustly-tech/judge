@@ -105,6 +105,7 @@ async fn the_full_submit_lease_report_cycle_works_over_http() {
         Some(json!({
             "protocol_version": PROTOCOL_VERSION,
             "worker_id": "worker-1",
+            "trial_package_cid": "b3:package",
             "verdict": "AC",
             "result_manifest_hash": "b3:manifest",
             "peak_memory_bytes": 65536,
@@ -175,6 +176,7 @@ async fn only_the_lease_holder_may_report_a_result() {
     let report = json!({
         "protocol_version": PROTOCOL_VERSION,
         "worker_id": "worker-2",
+        "trial_package_cid": "b3:package",
         "verdict": "AC",
         "result_manifest_hash": "b3:manifest",
         "peak_memory_bytes": 0,
@@ -202,6 +204,7 @@ async fn reporting_an_unknown_job_is_a_404() {
         Some(json!({
             "protocol_version": PROTOCOL_VERSION,
             "worker_id": "w",
+            "trial_package_cid": "b3:package",
             "verdict": "AC",
             "result_manifest_hash": "b3:m",
             "peak_memory_bytes": 0,

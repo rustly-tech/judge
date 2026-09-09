@@ -203,6 +203,7 @@ impl ResultManifest {
         ResultSummary {
             protocol_version: PROTOCOL_VERSION,
             worker_id: worker_id.into(),
+            trial_package_cid: self.trial_package_cid.clone(),
             verdict: self.verdict,
             result_manifest_hash: self.hash(),
             peak_memory_bytes: self
@@ -225,6 +226,8 @@ pub struct ResultSummary {
     pub protocol_version: u32,
     /// Reporting worker.
     pub worker_id: String,
+    /// Immutable Trial package that produced this result.
+    pub trial_package_cid: String,
     /// Final verdict.
     pub verdict: Verdict,
     /// Hash of the full manifest in the data plane.

@@ -267,6 +267,12 @@ impl CompileBackend for ContainerRustcCompiler {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(scratch.path(), std::fs::Permissions::from_mode(0o755))
+                .map_err(|error| {
+                    JudgeError::Infrastructure(format!(
+                        "make compiler scratch directory traversable: {error}"
+                    ))
+                })?;
             std::fs::set_permissions(&input, std::fs::Permissions::from_mode(0o444)).map_err(
                 |error| JudgeError::Infrastructure(format!("protect compiler input: {error}")),
             )?;

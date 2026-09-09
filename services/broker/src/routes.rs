@@ -107,6 +107,10 @@ async fn report(
             StatusCode::BAD_REQUEST,
             "unsupported protocol version".into(),
         )),
+        Err(ReportError::PackageMismatch) => Err(error(
+            StatusCode::BAD_REQUEST,
+            "result package does not match leased job".into(),
+        )),
     }
 }
 
