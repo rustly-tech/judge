@@ -39,7 +39,7 @@ anyhow = "1.0"
 axum = { version = "0.8", features = ["macros", "json"] }
 blake3 = "1.8"
 clap = { version = "4", features = ["derive", "env"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tempfile = "3"

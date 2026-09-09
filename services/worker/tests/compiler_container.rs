@@ -41,7 +41,8 @@ fn valid_dependency_free_rust_compiles_to_wasi() {
         )
         .unwrap();
     assert!(
-        matches!(output, CompileOutput::Module { ref bytes, .. } if bytes.starts_with(b"\0asm"))
+        matches!(output, CompileOutput::Module { ref bytes, .. } if bytes.starts_with(b"\0asm")),
+        "unexpected compile result: {output:?}"
     );
     assert!(running_compiler_containers().is_empty());
 }
@@ -74,7 +75,10 @@ fn compiler_fault_corpus_is_bounded_and_cleans_up() {
     })
     .unwrap()
     .compile(output_flood.as_bytes(), "rust-1.88-wasm32-wasip1");
-    assert!(matches!(flooded, Err(JudgeError::SecurityPolicy(_))));
+    assert!(
+        matches!(flooded, Err(JudgeError::SecurityPolicy(_))),
+        "unexpected output-flood result: {flooded:?}"
+    );
 
     let host_file = tempfile::NamedTempFile::new().unwrap();
     let traversal = format!(

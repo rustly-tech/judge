@@ -18,7 +18,9 @@ use rustly_judge_common::Limits;
 use rustly_judge_protocol::{Backend, JobSpec, ResultSummary, TrustClass, PROTOCOL_VERSION};
 use rustly_judge_worker::compile::{CompileBackend, PrecompiledModule};
 use rustly_judge_worker::pipeline::JobContext;
-use rustly_judge_worker::{run_job, ArtifactSource, ContainerRustcCompiler, LocalArtifacts};
+use rustly_judge_worker::{
+    run_job, ArtifactSource, ArtifactStore, ContainerRustcCompiler, HttpArtifacts, LocalArtifacts,
+};
 use rustly_sandbox::WasmtimeBackend;
 use serde::{Deserialize, Serialize};
 
@@ -84,7 +86,16 @@ enum Command {
         broker: String,
         /// Directory of artifacts named by CID.
         #[arg(long, env = "RUSTLY_ARTIFACTS")]
-        artifacts: PathBuf,
+        artifacts: Option<PathBuf>,
+        /// Artifact gateway URL for hosted operation.
+        #[arg(long, env = "RUSTLY_ARTIFACT_URL")]
+        artifact_url: Option<String>,
+        /// Trusted credential for the artifact gateway.
+        #[arg(long, env = "RUSTLY_ARTIFACT_READ_TOKEN")]
+        artifact_token: Option<String>,
+        /// Signed worker credential for broker requests.
+        #[arg(long, env = "RUSTLY_WORKER_TOKEN")]
+        broker_token: String,
         /// Compiled-artifact cache directory.
         #[arg(long, env = "RUSTLY_CACHE")]
         cache: Option<PathBuf>,
@@ -225,6 +236,9 @@ fn main() -> anyhow::Result<()> {
         Command::Serve {
             broker,
             artifacts,
+            artifact_url,
+            artifact_token,
+            broker_token,
             cache,
             worker_id,
             trust,
@@ -238,6 +252,9 @@ fn main() -> anyhow::Result<()> {
             runtime.block_on(serve(
                 broker,
                 artifacts,
+                artifact_url,
+                artifact_token,
+                broker_token,
                 cache,
                 worker_id,
                 trust,
@@ -253,7 +270,10 @@ fn main() -> anyhow::Result<()> {
 #[allow(clippy::too_many_arguments)]
 async fn serve(
     broker: String,
-    artifacts: PathBuf,
+    artifacts: Option<PathBuf>,
+    artifact_url: Option<String>,
+    artifact_token: Option<String>,
+    broker_token: String,
     cache: Option<PathBuf>,
     worker_id: String,
     trust: TrustClass,
@@ -261,7 +281,13 @@ async fn serve(
     compiler_image: Option<String>,
 ) -> anyhow::Result<()> {
     {
-        let artifacts = Arc::new(LocalArtifacts::new(artifacts));
+        let artifacts: Arc<dyn ArtifactStore> = match (artifacts, artifact_url, artifact_token) {
+            (Some(path), None, None) => Arc::new(LocalArtifacts::new(path)),
+            (None, Some(url), Some(token)) => Arc::new(
+                HttpArtifacts::new(url, token).map_err(|error| anyhow::anyhow!("{error}"))?,
+            ),
+            _ => bail!("configure either --artifacts, or both --artifact-url and --artifact-token"),
+        };
         let sandbox = WasmtimeBackend::new().context("building the sandbox")?;
         let cache = cache
             .map(ArtifactCache::open)
@@ -300,6 +326,7 @@ async fn serve(
         loop {
             let leased: LeaseResponse = client
                 .post(format!("{broker}/api/v1/judge/leases"))
+                .bearer_auth(&broker_token)
                 .json(&LeaseRequest {
                     protocol_version: PROTOCOL_VERSION,
                     worker_id: worker_id.clone(),
@@ -344,7 +371,16 @@ async fn serve(
                             verdict = %report.verdict(),
                             "judged"
                         );
-                        report.manifest.summary(&worker_id)
+                        let manifest_bytes = serde_json::to_vec(&report.manifest)
+                            .context("serialising result manifest")?;
+                        let stored_cid = artifacts
+                            .put(&manifest_bytes)
+                            .map_err(|error| anyhow::anyhow!("storing result manifest: {error}"))?;
+                        let summary = report.manifest.summary(&worker_id);
+                        if stored_cid != summary.result_manifest_hash {
+                            bail!("artifact store returned the wrong result manifest CID");
+                        }
+                        summary
                     }
                     Err(error) => {
                         // Retryable failures are reported honestly as JE/IE
@@ -366,6 +402,7 @@ async fn serve(
 
                 let response = client
                     .post(format!("{broker}/api/v1/judge/jobs/{}/result", spec.job_id))
+                    .bearer_auth(&broker_token)
                     .json(&summary)
                     .send()
                     .await;
@@ -395,7 +432,10 @@ async fn wait_for_shutdown() {
 }
 
 /// Read the package to fill in the fields the job spec must agree with.
-fn align_with_package(artifacts: &LocalArtifacts, mut spec: JobSpec) -> anyhow::Result<JobSpec> {
+fn align_with_package(
+    artifacts: &dyn ArtifactSource,
+    mut spec: JobSpec,
+) -> anyhow::Result<JobSpec> {
     let bytes = artifacts
         .fetch(&spec.trial_package_cid)
         .map_err(|e| anyhow::anyhow!("resolving the package: {e}"))?;

@@ -20,6 +20,12 @@ pub trait ArtifactSource: Send + Sync {
     fn fetch(&self, cid: &str) -> Result<Vec<u8>>;
 }
 
+/// Read/write access used by trusted workers for result manifests.
+pub trait ArtifactStore: ArtifactSource {
+    /// Store bytes by their BLAKE3 CID and return that CID.
+    fn put(&self, bytes: &[u8]) -> Result<String>;
+}
+
 /// A directory of files named by their CID.
 ///
 /// Used for local development, offline operation, and the worker's own tests.
@@ -36,6 +42,17 @@ impl LocalArtifacts {
 
     /// Store `bytes` under their CID and return it. Test and seed helper.
     pub fn put(&self, bytes: &[u8]) -> Result<String> {
+        <Self as ArtifactStore>::put(self, bytes)
+    }
+
+    /// The directory backing this source.
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+}
+
+impl ArtifactStore for LocalArtifacts {
+    fn put(&self, bytes: &[u8]) -> Result<String> {
         std::fs::create_dir_all(&self.root).map_err(|e| {
             JudgeError::Infrastructure(format!("cannot create {:?}: {e}", self.root))
         })?;
@@ -43,11 +60,6 @@ impl LocalArtifacts {
         std::fs::write(self.root.join(&cid), bytes)
             .map_err(|e| JudgeError::Infrastructure(format!("cannot write {cid}: {e}")))?;
         Ok(cid)
-    }
-
-    /// The directory backing this source.
-    pub fn root(&self) -> &Path {
-        &self.root
     }
 }
 
@@ -72,6 +84,102 @@ impl ArtifactSource for LocalArtifacts {
             });
         }
         Ok(bytes)
+    }
+}
+
+/// Authenticated client for the artifact gateway used by hosted workers.
+#[derive(Debug, Clone)]
+pub struct HttpArtifacts {
+    base_url: String,
+    bearer_token: String,
+    client: reqwest::blocking::Client,
+}
+
+impl HttpArtifacts {
+    /// Construct a client with bounded network operations.
+    pub fn new(base_url: impl Into<String>, bearer_token: impl Into<String>) -> Result<Self> {
+        let bearer_token = bearer_token.into();
+        if bearer_token.len() < 32 {
+            return Err(JudgeError::SecurityPolicy(
+                "artifact gateway credential must be at least 32 bytes".into(),
+            ));
+        }
+        let client = reqwest::blocking::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .timeout(std::time::Duration::from_secs(20))
+            .build()
+            .map_err(|error| {
+                JudgeError::Infrastructure(format!("build artifact HTTP client: {error}"))
+            })?;
+        Ok(Self {
+            base_url: base_url.into().trim_end_matches('/').to_owned(),
+            bearer_token,
+            client,
+        })
+    }
+
+    fn url(&self, cid: &str) -> String {
+        format!("{}/api/v1/artifacts/{cid}", self.base_url)
+    }
+}
+
+impl ArtifactSource for HttpArtifacts {
+    fn fetch(&self, cid: &str) -> Result<Vec<u8>> {
+        if !is_cid(cid) {
+            return Err(JudgeError::CacheIntegrity {
+                cid: cid.to_owned(),
+                detail: "not a valid BLAKE3 CID".into(),
+            });
+        }
+        let response = self
+            .client
+            .get(self.url(cid))
+            .bearer_auth(&self.bearer_token)
+            .send()
+            .and_then(reqwest::blocking::Response::error_for_status)
+            .map_err(|error| {
+                JudgeError::Infrastructure(format!("fetch artifact {cid}: {error}"))
+            })?;
+        if response
+            .content_length()
+            .is_some_and(|size| size > 32 * 1024 * 1024)
+        {
+            return Err(JudgeError::SecurityPolicy(
+                "artifact response exceeds 32 MiB".into(),
+            ));
+        }
+        let bytes = response
+            .bytes()
+            .map_err(|error| JudgeError::Infrastructure(format!("read artifact {cid}: {error}")))?;
+        if bytes.len() > 32 * 1024 * 1024 {
+            return Err(JudgeError::SecurityPolicy(
+                "artifact response exceeds 32 MiB".into(),
+            ));
+        }
+        let actual = self::cid(&bytes);
+        if actual != cid {
+            return Err(JudgeError::CacheIntegrity {
+                cid: cid.to_owned(),
+                detail: format!("content hashes to {actual}"),
+            });
+        }
+        Ok(bytes.to_vec())
+    }
+}
+
+impl ArtifactStore for HttpArtifacts {
+    fn put(&self, bytes: &[u8]) -> Result<String> {
+        let cid = self::cid(bytes);
+        self.client
+            .put(self.url(&cid))
+            .bearer_auth(&self.bearer_token)
+            .body(bytes.to_vec())
+            .send()
+            .and_then(reqwest::blocking::Response::error_for_status)
+            .map_err(|error| {
+                JudgeError::Infrastructure(format!("store artifact {cid}: {error}"))
+            })?;
+        Ok(cid)
     }
 }
 

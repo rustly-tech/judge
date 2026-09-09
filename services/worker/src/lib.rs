@@ -29,7 +29,7 @@ pub mod compile;
 pub mod compile_container;
 pub mod pipeline;
 
-pub use artifacts::{ArtifactSource, LocalArtifacts};
+pub use artifacts::{ArtifactSource, ArtifactStore, HttpArtifacts, LocalArtifacts};
 pub use compile::{CompileBackend, CompileOutput, PrecompiledModule};
 pub use compile_container::{CompilerLimits, ContainerRustcCompiler};
 pub use pipeline::{run_job, JobReport};

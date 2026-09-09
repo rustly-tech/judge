@@ -2,8 +2,9 @@ FROM rust:1.88.0-slim-bookworm@sha256:38bc5a86d998772d4aec2348656ed21438d20fcdce
 
 RUN rustup target add wasm32-wasip1 \
     && rustc --version --verbose \
-    && rustup component remove cargo \
-    && rm -f /usr/local/cargo/bin/rustfmt /usr/local/cargo/bin/clippy-driver \
+    && rm -f /usr/local/cargo/bin/cargo /usr/local/cargo/bin/cargo-clippy \
+        /usr/local/cargo/bin/cargo-fmt /usr/local/cargo/bin/rustfmt \
+        /usr/local/cargo/bin/clippy-driver \
     && useradd --no-create-home --uid 65532 --shell /usr/sbin/nologin compiler
 
 USER 65532:65532
