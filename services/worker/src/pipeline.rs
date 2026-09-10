@@ -97,6 +97,12 @@ pub fn run_job(context: &JobContext<'_>, spec: &JobSpec) -> Result<JobReport> {
             spec.environment_id, package.environment.id
         )));
     }
+    if package.limits != spec.limits {
+        return Err(JudgeError::MalformedPackage(format!(
+            "job limits do not match evaluation package {}",
+            spec.trial_package_cid
+        )));
+    }
 
     let source = context.artifacts.fetch(&spec.source_cid)?;
 

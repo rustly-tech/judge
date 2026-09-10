@@ -97,6 +97,7 @@ struct Fixture {
     source_cid: String,
     environment_id: String,
     trial_version: u32,
+    limits: Limits,
 }
 
 fn fixture(package: &TrialPackage, module: &[u8]) -> Fixture {
@@ -114,6 +115,7 @@ fn fixture(package: &TrialPackage, module: &[u8]) -> Fixture {
         source_cid,
         environment_id: package.environment.id.clone(),
         trial_version: package.version,
+        limits: package.limits,
     }
 }
 
@@ -126,7 +128,7 @@ impl Fixture {
             trial_package_cid: self.package_cid.clone(),
             trial_version: self.trial_version,
             environment_id: self.environment_id.clone(),
-            limits: Limits::default(),
+            limits: self.limits,
             backend: Backend::Wasmtime,
             includes_hidden_tests: hidden,
         }
@@ -287,6 +289,23 @@ fn a_job_asking_for_the_wrong_environment_is_refused() {
         Verdict::JudgeError,
         "a verdict is only meaningful against the environment the package declares"
     );
+}
+
+#[test]
+fn job_limits_must_match_the_versioned_evaluation_package() {
+    let package = package(vec![case(
+        "public-1",
+        Visibility::Public,
+        "hello\n",
+        "hello\n",
+    )]);
+    let f = fixture(&package, &echo_module());
+    let mut spec = f.spec(false);
+    spec.limits.wall_ms += 1;
+
+    let error = run_job(&f.context(TrustClass::Trusted, None), &spec).unwrap_err();
+    assert_eq!(error.verdict(), Verdict::JudgeError);
+    assert!(error.to_string().contains("limits do not match"));
 }
 
 #[test]
