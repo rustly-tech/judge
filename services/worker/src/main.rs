@@ -134,8 +134,56 @@ struct LeaseRequest {
 
 #[derive(Debug, Deserialize)]
 struct LeaseResponse {
-    jobs: Vec<JobSpec>,
+    jobs: Vec<HostedJobLease>,
     poll_after_seconds: u32,
+}
+
+/// The server's hosted lease shape. The judge's internal `JobSpec` also serves
+/// local/offline execution, so conversion happens explicitly at this boundary
+/// instead of relying on two independently evolved structs to deserialize as
+/// if they were identical.
+#[derive(Debug, Deserialize)]
+struct HostedJobLease {
+    protocol_version: u32,
+    job_id: String,
+    source_cid: String,
+    trial_package_cid: String,
+    trial_version: u32,
+    environment_id: String,
+    limits: HostedExecutionLimits,
+    backend: Backend,
+    may_receive_hidden_tests: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct HostedExecutionLimits {
+    run_wall_ms: u64,
+    memory_bytes: u64,
+    output_bytes: u64,
+    fuel: u64,
+}
+
+impl From<HostedJobLease> for JobSpec {
+    fn from(lease: HostedJobLease) -> Self {
+        Self {
+            protocol_version: lease.protocol_version,
+            job_id: lease.job_id,
+            source_cid: lease.source_cid,
+            trial_package_cid: lease.trial_package_cid,
+            trial_version: lease.trial_version,
+            environment_id: lease.environment_id,
+            limits: Limits {
+                wall_ms: lease.limits.run_wall_ms,
+                memory_bytes: lease.limits.memory_bytes,
+                output_bytes: lease.limits.output_bytes,
+                fuel: lease.limits.fuel,
+                table_elements: 10_000,
+                instances: 1,
+            },
+            backend: lease.backend,
+            includes_hidden_tests: lease.may_receive_hidden_tests,
+        }
+    }
 }
 
 // Deliberately not `#[tokio::main]`.
@@ -352,7 +400,8 @@ async fn serve(
                 continue;
             }
 
-            for spec in leased.jobs {
+            for lease in leased.jobs {
+                let spec = JobSpec::from(lease);
                 let context = JobContext {
                     artifacts: artifacts.as_ref(),
                     compiler,
@@ -453,4 +502,39 @@ fn align_with_package(
     spec.trial_version = package.version;
     spec.limits = package.limits;
     Ok(spec)
+}
+
+#[cfg(test)]
+mod hosted_contract_tests {
+    use super::*;
+
+    #[test]
+    fn server_lease_shape_converts_to_the_internal_job() {
+        let response: LeaseResponse = serde_json::from_value(serde_json::json!({
+            "jobs": [{
+                "protocol_version": 1,
+                "job_id": "00000000-0000-0000-0000-000000000001",
+                "source_cid": "b3:source",
+                "trial_package_cid": "b3:package",
+                "trial_version": 2,
+                "environment_id": "rust-1.88-wasm32-wasip1",
+                "limits": {
+                    "compile_wall_ms": 20000,
+                    "run_wall_ms": 2000,
+                    "memory_bytes": 67108864,
+                    "output_bytes": 65536,
+                    "fuel": 50000000
+                },
+                "backend": "wasmtime",
+                "may_receive_hidden_tests": true,
+                "lease_expires_at": 1
+            }],
+            "poll_after_seconds": 5
+        }))
+        .unwrap();
+        let job = JobSpec::from(response.jobs.into_iter().next().unwrap());
+        assert!(job.includes_hidden_tests);
+        assert_eq!(job.limits.wall_ms, 2000);
+        assert_eq!(job.environment_id, "rust-1.88-wasm32-wasip1");
+    }
 }
