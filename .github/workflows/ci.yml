@@ -54,6 +54,9 @@ jobs:
     name: compiler container corpus
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
@@ -70,6 +73,28 @@ jobs:
           RUSTLY_TEST_COMPILER_IMAGE="$image" cargo test \
             -p rustly-judge-worker --test compiler_container -- --ignored --test-threads=1
           [ -z "$(docker ps --filter name=rustly-compile- --format '{{.Names}}')" ]
+      - name: Log in to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish the qualified compiler image
+        if: github.event_name == 'push'
+        run: |
+          set -euo pipefail
+          image=ghcr.io/${{ github.repository }}/compiler
+          docker tag rustly-compiler:qualification "$image:${{ github.sha }}"
+          docker tag rustly-compiler:qualification "$image:rust-1.88-wasm32-wasip1"
+          docker push "$image:${{ github.sha }}"
+          docker push "$image:rust-1.88-wasm32-wasip1"
+      - name: Generate the compiler image SBOM
+        if: github.event_name == 'push'
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with:
+          image: rustly-compiler:qualification
+          artifact-name: rustly-compiler-sbom.spdx.json
 
   real-rust:
     name: real Rust end to end (wasm32-wasip1)
