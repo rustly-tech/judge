@@ -128,6 +128,7 @@ struct LeaseRequest {
     protocol_version: u32,
     worker_id: String,
     trust_class: TrustClass,
+    backends: Vec<Backend>,
     capacity: u32,
 }
 
@@ -333,6 +334,7 @@ async fn serve(
                     protocol_version: PROTOCOL_VERSION,
                     worker_id: worker_id.clone(),
                     trust_class: trust,
+                    backends: vec![Backend::Wasmtime],
                     capacity,
                 })
                 .send()
@@ -407,7 +409,11 @@ async fn serve(
                 if let Some(token) = &broker_token {
                     result_request = result_request.bearer_auth(token);
                 }
-                let response = result_request.json(&summary).send().await;
+                let response = result_request
+                    .json(&summary)
+                    .send()
+                    .await
+                    .and_then(reqwest::Response::error_for_status);
                 if let Err(error) = response {
                     tracing::error!(job_id = %spec.job_id, %error, "could not report a result");
                 }

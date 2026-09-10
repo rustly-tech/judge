@@ -342,6 +342,20 @@ impl CompileBackend for ContainerRustcCompiler {
         let mut diagnostics = stderr;
         diagnostics.extend_from_slice(&stdout);
         let diagnostics = String::from_utf8_lossy(&diagnostics).into_owned();
+        // rustc/LLVM can catch SIGXFSZ and exit with an ordinary non-zero
+        // status. Treat evidence that the output file limit fired as a policy
+        // event so it is never reported to a learner as a compile error.
+        let artifact = output.join("submission.wasm");
+        let hit_artifact_limit = std::fs::metadata(&artifact)
+            .is_ok_and(|metadata| metadata.len() >= self.limits.artifact_bytes as u64)
+            || diagnostics.to_ascii_lowercase().contains("file too large")
+            || diagnostics.to_ascii_lowercase().contains("os error 27");
+        if hit_artifact_limit {
+            return Err(JudgeError::SecurityPolicy(format!(
+                "compiled artifact reached the {} byte output limit",
+                self.limits.artifact_bytes
+            )));
+        }
         if status.code().is_some_and(|code| code >= 125) {
             return Err(JudgeError::Infrastructure(format!(
                 "compiler container failed to start: {}",
@@ -352,7 +366,6 @@ impl CompileBackend for ContainerRustcCompiler {
             return Ok(CompileOutput::Failed { diagnostics });
         }
 
-        let artifact = output.join("submission.wasm");
         let metadata = std::fs::metadata(&artifact).map_err(|error| {
             JudgeError::Infrastructure(format!("compiler produced no WASI artifact: {error}"))
         })?;
