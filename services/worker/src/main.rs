@@ -95,7 +95,7 @@ enum Command {
         artifact_token: Option<String>,
         /// Signed worker credential for broker requests.
         #[arg(long, env = "RUSTLY_WORKER_TOKEN")]
-        broker_token: String,
+        broker_token: Option<String>,
         /// Compiled-artifact cache directory.
         #[arg(long, env = "RUSTLY_CACHE")]
         cache: Option<PathBuf>,
@@ -273,7 +273,7 @@ async fn serve(
     artifacts: Option<PathBuf>,
     artifact_url: Option<String>,
     artifact_token: Option<String>,
-    broker_token: String,
+    broker_token: Option<String>,
     cache: Option<PathBuf>,
     worker_id: String,
     trust: TrustClass,
@@ -324,9 +324,11 @@ async fn serve(
         }
 
         loop {
-            let leased: LeaseResponse = client
-                .post(format!("{broker}/api/v1/judge/leases"))
-                .bearer_auth(&broker_token)
+            let mut lease_request = client.post(format!("{broker}/api/v1/judge/leases"));
+            if let Some(token) = &broker_token {
+                lease_request = lease_request.bearer_auth(token);
+            }
+            let leased: LeaseResponse = lease_request
                 .json(&LeaseRequest {
                     protocol_version: PROTOCOL_VERSION,
                     worker_id: worker_id.clone(),
@@ -400,12 +402,12 @@ async fn serve(
                     }
                 };
 
-                let response = client
-                    .post(format!("{broker}/api/v1/judge/jobs/{}/result", spec.job_id))
-                    .bearer_auth(&broker_token)
-                    .json(&summary)
-                    .send()
-                    .await;
+                let mut result_request =
+                    client.post(format!("{broker}/api/v1/judge/jobs/{}/result", spec.job_id));
+                if let Some(token) = &broker_token {
+                    result_request = result_request.bearer_auth(token);
+                }
+                let response = result_request.json(&summary).send().await;
                 if let Err(error) = response {
                     tracing::error!(job_id = %spec.job_id, %error, "could not report a result");
                 }

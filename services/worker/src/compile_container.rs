@@ -147,7 +147,7 @@ impl ContainerRustcCompiler {
             "--ulimit".into(),
             format!("fsize={0}:{0}", self.limits.artifact_bytes).into(),
             "--tmpfs".into(),
-            "source=/tmp,tmpfs-mode=1777,tmpfs-size=16777216".into(),
+            "/tmp:rw,nosuid,nodev,noexec,size=16777216,mode=1777".into(),
             "--mount".into(),
             source_mount.into(),
             "--mount".into(),
@@ -342,6 +342,12 @@ impl CompileBackend for ContainerRustcCompiler {
         let mut diagnostics = stderr;
         diagnostics.extend_from_slice(&stdout);
         let diagnostics = String::from_utf8_lossy(&diagnostics).into_owned();
+        if status.code().is_some_and(|code| code >= 125) {
+            return Err(JudgeError::Infrastructure(format!(
+                "compiler container failed to start: {}",
+                diagnostics.trim()
+            )));
+        }
         if !status.success() {
             return Ok(CompileOutput::Failed { diagnostics });
         }
@@ -409,6 +415,7 @@ mod tests {
             "--cpus 1",
             "nofile=64:64",
             "cpu=20:20",
+            "/tmp:rw,nosuid,nodev,noexec,size=16777216,mode=1777",
             "readonly",
             "wasm32-wasip1",
         ] {
