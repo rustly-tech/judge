@@ -134,8 +134,24 @@ struct LeaseRequest {
 
 #[derive(Debug, Deserialize)]
 struct LeaseResponse {
-    jobs: Vec<HostedJobLease>,
+    jobs: Vec<LeasedJob>,
     poll_after_seconds: u32,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum LeasedJob {
+    Hosted(HostedJobLease),
+    Standalone(JobSpec),
+}
+
+impl From<LeasedJob> for JobSpec {
+    fn from(job: LeasedJob) -> Self {
+        match job {
+            LeasedJob::Hosted(lease) => lease.into(),
+            LeasedJob::Standalone(spec) => spec,
+        }
+    }
 }
 
 /// The server's hosted lease shape. The judge's internal `JobSpec` also serves
@@ -536,5 +552,34 @@ mod hosted_contract_tests {
         assert!(job.includes_hidden_tests);
         assert_eq!(job.limits.wall_ms, 2000);
         assert_eq!(job.environment_id, "rust-1.88-wasm32-wasip1");
+    }
+
+    #[test]
+    fn standalone_broker_job_shape_remains_supported() {
+        let response: LeaseResponse = serde_json::from_value(serde_json::json!({
+            "jobs": [{
+                "protocol_version": 1,
+                "job_id": "job-1",
+                "source_cid": "b3:source",
+                "trial_package_cid": "b3:package",
+                "trial_version": 2,
+                "environment_id": "rust-1.88-wasm32-wasip1",
+                "limits": {
+                    "wall_ms": 2000,
+                    "memory_bytes": 67108864,
+                    "output_bytes": 65536,
+                    "fuel": 50000000,
+                    "table_elements": 10000,
+                    "instances": 1
+                },
+                "backend": "wasmtime",
+                "includes_hidden_tests": true
+            }],
+            "poll_after_seconds": 5
+        }))
+        .unwrap();
+        let job = JobSpec::from(response.jobs.into_iter().next().unwrap());
+        assert!(job.includes_hidden_tests);
+        assert_eq!(job.job_id, "job-1");
     }
 }
