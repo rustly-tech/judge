@@ -50,7 +50,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 # Core modules only: no GC, no component model. Neither is needed for a
 # wasm32-wasip1 submission, and both widen the trusted surface.
-wasmtime = { version = "48", default-features = false, features = ["cranelift", "runtime", "std"] }
+wasmtime = { version = "50", default-features = false, features = ["cranelift", "runtime", "std"] }
 wasmtime-wasi = { version = "48", default-features = false, features = ["p1", "p2"] }
 bytes = "1"
 wat = "1"
